@@ -8,12 +8,16 @@ import https from "node:https";
 import { exit } from "node:process";
 import { IMusic, IUser, IVideo } from "../../Interfaces";
 import { Music, User, Video } from "../Entities";
+import { HttpsProxyAgent } from "https-proxy-agent";
 
 export class TTScraper {
   _cookies?: string = "";
+  _proxy?: string = "";
 
-  constructor(cookies?: string) {
+
+  constructor(cookies?: string, proxy?: string) {
     this._cookies = cookies;
+    this._proxy = proxy;
   }
   /**
    * Fetches the website content and convert its content into text.
@@ -43,7 +47,9 @@ export class TTScraper {
 
     const DefaultOptions = {
       agent: (_parsedURL: any) => {
-        if (_parsedURL.protocol == "http:") {
+        if (this._proxy) {
+          return new HttpsProxyAgent(this._proxy);
+        } else if (_parsedURL.protocol == "http:") {
           return httpAgent;
         } else {
           return httpsAgent;
