@@ -157,12 +157,12 @@ export class TTScraper {
 
   async TryFetch(link: string) {
     const $ = await this.requestWebsite(link);
-    if (!this.checkJSONExisting($("#SIGI_STATE").text())) {
-      const videoJson = await this.requestWithPuppeteer(link);
-      return JSON.parse(videoJson);
-    } else {
+    // if (!this.checkJSONExisting($("#SIGI_STATE").text())) {
+    //   const videoJson = await this.requestWithPuppeteer(link);
+    //   return JSON.parse(videoJson);
+    // } else {
       return JSON.parse($("#SIGI_STATE").text());
-    }
+    // }
   }
 
   /**
