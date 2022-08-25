@@ -211,10 +211,14 @@ export class TTScraper {
    * @returns User
    */
 
-  async user(username: string): Promise<User> {
+  async user(username: string): Promise<User | null> {
     if (!username) throw new Error("Please enter a username");
 
     let infoObject = await this.TryFetch(`https://www.tiktok.com/@${username}`);
+
+    if (!infoObject?.UserModule?.users) {
+      return null;
+    }
 
     const userObject = infoObject.UserModule.users[username];
 
@@ -244,12 +248,16 @@ export class TTScraper {
    * @returns IVideo[]
    */
 
-  async getAllVideosFromUser(username: string): Promise<IVideo[]> {
+  async getAllVideosFromUser(username: string): Promise<IVideo[] | null> {
     if (!username) throw new Error("You must provide a username!");
 
     let videosObject = await this.TryFetch(
       `https://www.tiktok.com/@${username}`
     );
+
+    if (!videosObject) {
+      return null;
+    }
 
     const videos: IVideo[] = [];
 
