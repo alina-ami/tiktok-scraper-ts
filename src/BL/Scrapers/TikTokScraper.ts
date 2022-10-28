@@ -171,11 +171,14 @@ export class TTScraper {
    * @returns Video
    */
 
-  async video(uri: string, noWaterMark?: boolean): Promise<Video> {
+  async video(uri: string, noWaterMark?: boolean): Promise<Video | void> {
     if (!uri) throw new Error("A video URL must be provided");
     let videoObject = await this.TryFetch(uri);
-
-    const id = videoObject.ItemList.video.list[0];
+    const id = videoObject.ItemList?.video?.list[0] ?? 0;
+    if (id == 0) return console.log(`Could not find the Video on Tiktok!`);
+    const videoURL = noWaterMark
+      ? await this.noWaterMark(videoObject.ItemModule[id].video.id)
+      : videoObject.ItemModule[id].video.downloadAddr.trim();
     const videoResult: IVideo = new Video(
       videoObject.ItemModule[id].video.id,
       videoObject.ItemModule[id].desc,
@@ -190,14 +193,10 @@ export class TTScraper {
       videoObject.ItemModule[id].stats.diggCount,
       videoObject.ItemModule[id].stats.commentCount,
       videoObject.ItemModule[id].stats.playCount,
-      noWaterMark
-        ? await this.noWaterMark(videoObject.ItemModule[id].video.id)
-        : videoObject.ItemModule[id].video.downloadAddr.trim(),
+      videoURL,
       videoObject.ItemModule[id].video.cover,
       videoObject.ItemModule[id].video.dynamicCover,
-      noWaterMark
-        ? await this.noWaterMark(videoObject.ItemModule[id].video.id)
-        : videoObject.ItemModule[id].video.playAddr.trim(),
+      videoURL,
       videoObject.ItemModule[id].video.format,
       videoObject.ItemModule[id].nickname
     );
@@ -211,14 +210,10 @@ export class TTScraper {
    * @returns User
    */
 
-  async user(username: string): Promise<User | null> {
+  async user(username: string): Promise<User> {
     if (!username) throw new Error("Please enter a username");
 
     let infoObject = await this.TryFetch(`https://www.tiktok.com/@${username}`);
-
-    if (!infoObject?.UserModule?.users) {
-      return null;
-    }
 
     const userObject = infoObject.UserModule.users[username];
 
@@ -245,49 +240,96 @@ export class TTScraper {
   /**
    * Scrapes a user page and returns a list of all videos for this user
    * @param username tiktok username
+   * @param noWaterMark whether the returned videos should be without watermark
    * @returns IVideo[]
    */
 
   async getAllVideosFromUser(username: string): Promise<IVideo[] | null> {
     if (!username) throw new Error("You must provide a username!");
 
-    let videosObject = await this.TryFetch(
-      `https://www.tiktok.com/@${username}`
-    );
+    const {secretUID} = await this.user(`${username}`);
 
-    if (!videosObject) {
-      return null;
+    if (!secretUID) {
+      throw new Error("Couuld not find user UID!");
     }
+    let cursor = "";
 
     const videos: IVideo[] = [];
+    const resultArray = [];
+    const userVideos = await this.fetchUserVideos(secretUID, cursor);
 
-    const { ItemList } = videosObject;
-    ItemList["user-post"].list.forEach((id: string) => {
-      videos.push(
-        new Video(
-          videosObject.ItemModule[id].video.id,
-          videosObject.ItemModule[id].desc,
-          new Date(
-            Number(videosObject.ItemModule[id].createTime) * 1000
-          ).toLocaleDateString(),
-          Number(videosObject.ItemModule[id].video.height),
-          Number(videosObject.ItemModule[id].video.width),
-          Number(videosObject.ItemModule[id].video.duration),
-          videosObject.ItemModule[id].video.ratio,
-          videosObject.ItemModule[id].stats.shareCount,
-          videosObject.ItemModule[id].stats.diggCount,
-          videosObject.ItemModule[id].stats.commentCount,
-          videosObject.ItemModule[id].stats.playCount,
-          videosObject.ItemModule[id].video.downloadAddr.trim(),
-          videosObject.ItemModule[id].video.cover,
-          videosObject.ItemModule[id].video.dynamicCover,
-          videosObject.ItemModule[id].video.playAddr.trim(),
-          videosObject.ItemModule[id].video.format,
-          videosObject.ItemModule[id].author
-        )
-      );
-    });
+    if (userVideos?.itemList) {
+      resultArray.push(userVideos.itemList);
+      cursor = userVideos.cursor;
+    }
+
+    if (userVideos?.hasMore === true) {
+      while (true) {
+        const fetchMore = await this.fetchUserVideos(secretUID, cursor);
+        resultArray.push(fetchMore.itemList);
+        cursor = fetchMore.cursor;
+        if (fetchMore.hasMore == false) {
+          break;
+        }
+      }
+    }
+
+    for (const result of resultArray) {
+      // const videoURL = noWaterMark
+      //   ? await this.noWaterMark(videosObject.ItemModule[id].video.id)
+      //   : videosObject.ItemModule[id].video.downloadAddr.trim();
+      for (const video of result) {
+        videos.push(
+          new Video(
+            video.id,
+            video.desc,
+            new Date(Number(video.createTime) * 1000).toLocaleDateString(),
+            Number(video.video?.height),
+            Number(video.video?.width),
+            Number(video.video?.duration),
+            video.video?.ratio,
+            video?.stats?.shareCount,
+            video?.stats?.diggCount,
+            video?.stats?.commentCount,
+            video?.stats?.playCount,
+            video.video?.downloadAddr.trim(),
+            video?.video?.cover,
+            video?.video?.dynamicCover,
+            video.video?.downloadAddr.trim(),
+            video?.video?.format,
+            video.author
+          )
+        );
+      }
+    }
+
     return videos;
+  }
+
+  /**
+   * Fetches Users Post directly from the API
+   * @param userUID
+   * @param cursor
+   * @returns JSON Object from the API
+   */
+
+  async fetchUserVideos(userUID: string, cursor: string) {
+    const fetchUser = await fetch(
+      `https://m.tiktok.com/api/post/item_list/?aid=1988&count=35&secUid=${userUID}&cursor=${cursor}`,
+      {
+        headers: {
+          "Accept-Encoding": "gzip, deflate, br",
+          Connection: "keep-alive",
+          Cookie:
+            "_ttp=20giOKHgEqBuTmVEAZtfn1d2hY7; ttwid=1%7CTQIxz0XiWfp7pukZEMXLVKPHz-8yYy-hFtsuP9QH6qQ%7C1666445148%7Cb9a0888038642e8181e42a5fdaac6f198842f5be356d87316064ad3bf1f53e33; _abck=2C43FEAB6D7433C06BC6BA58A7ABDFFC~-1~YAAQPeUVAveE++WDAQAAMPXe/wjYc6xTVTh4Ke+kHGxxgJfxDRcT0ee3UkTu3sYlI0/69c8OLY/v+ofiwRwfxveidVDxaESN7yjCkBHSBV2dseB7rOBVUGyOtm1hGsf/hGHEVHVopulk0NAeiJoOWsARcJDql0k07Qhcv2pmP5lYQ17fhi75Lm6tFGCSwl+O9+idv5u8yCSf675M33/mdm5vuhXjPHCASZIjZVftaPqSdJdEDy6Z772SQ3VwQhMMOMpF51aj29e99OCtMRPM3bmbda16q4UAo2m8guw0c3HxhdCTYd/R7MmqDbr51KPRFFYiGmSJj49PstRweWQY4WjaAO+0Bx9ejfYha7dp1Cp/54sYHlI2oYIpTh9c9x2NbNRlFBEghhWK+d4=~-1~-1~-1; cookie-consent={%22ga%22:true%2C%22af%22:true%2C%22fbp%22:true%2C%22lip%22:true%2C%22bing%22:true%2C%22ttads%22:true%2C%22reddit%22:true%2C%22version%22:%22v8%22}; msToken=2ly4AKsEPS3tqqICLrucL3vfxEGgfhV8yzbp4ntCJRwbL0qBr1HGS-39CmfhhfoJgh9AjO-ZZw8yPTeh7VLiaRHPjEFNe-C4p0itrLBHjbjrrnc2vk19rUJNgefqanCQvlY5zg==; bm_sz=F7CD2096F100E2BBF898F75FB340B07E~YAAQPeUVAviE++WDAQAAMPXe/xGNyQyHT0csQ+5X+XBNhPNWpfB37e3Cc+Cy6ca1L3bb3+xVQCSUzwOAZt3AfYCmfis2wGK9oUPRr+6Osp3ZBR2QFOyQX7e3HU8optmJ0xHZV0D6MZc4YzD0xlxoFSkjOxb754ZanGbuFyLJgPCXD926sCOgNBQuGx6Zgk29NwARbeoupgQrRptG/t6eFoJcDA3vL+nHqMpm6XtIXV7i4O5kXn7+E+eCybbMVhkTt+qTnMfot7ULa1NNQSDaQgwZa1UIw8eKs71dyE0cikQFjc4=~4473158~3354937; tt_csrf_token=cBoP4X6a-FRM6sy440ir5_77ij4DfchzNfWQ",
+          "User-Agent":
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:106.0) Gecko/20100101 Firefox/106.0",
+          Accept:
+            "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
+        },
+      }
+    );
+    return await fetchUser.json();
   }
 
   /**
@@ -358,7 +400,7 @@ export class TTScraper {
       }
     }
 
-    if (!options.watermark) {
+    if (options.watermark) {
       for (const [index, video] of getAllvideos.entries()) {
         console.log(
           `Downloading Video: ${
@@ -411,7 +453,10 @@ export class TTScraper {
     let id: string = "";
 
     if (link.startsWith("https")) {
-      id = (await this.video(link)).id;
+      const videoID = await this.video(link);
+      if (!videoID?.id)
+        return console.log(`Could not extract the Video ID from Tiktok!`);
+      id = videoID.id;
     } else {
       id = link;
     }
@@ -425,14 +470,14 @@ export class TTScraper {
         "There was an Error retrieveing this video without watermark!"
       );
 
-    const noWaterMarkID = noWaterJson.aweme_detail.video.download_addr.uri;
+    const noWaterMarkID = noWaterJson.aweme_detail.video.play_addr;
 
     if (!noWaterMarkID)
       throw new Error(
         "There was an Error retrieveing this video without watermark!"
       );
 
-    return `https://api-h2.tiktokv.com/aweme/v1/play/?video_id=${noWaterMarkID}`;
+    return noWaterMarkID.url_list[0];
   }
 
   /**

@@ -27,6 +27,7 @@ export async function fetchUser(username: string) {
 /**
  * Scrapes a user page and returns a list of all videos for this user
  * @param username tiktok username of a user
+ * @param noWaterMark if true, noWaterMark
  * @returns IVideo[]
  */
 
